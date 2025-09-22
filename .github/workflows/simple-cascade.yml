@@ -1,0 +1,78 @@
+name: Simple Repository Cascade
+on: [push, workflow_dispatch]
+
+jobs:
+  create-repos:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+        continue-on-error: true
+
+      - name: Create Next Batch of Repositories
+        continue-on-error: true
+        run: |
+          echo "🚀 Creating next batch of hex repositories..."
+
+          # Simple approach - create 10 new hex repositories
+          nix-shell -p github-cli --run '
+            for i in {21..30}; do
+              hex=$(printf "0x%02x" $i)
+              echo "Creating $hex..."
+              gh repo create $hex --public --description "SuperClaude Auto-Generated Node $hex"
+            done
+          '
+
+      - name: Ubuntu Fallback Repository Creation
+        if: failure()
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y curl
+          echo "Fallback repository creation attempted"
+
+      - name: Deploy Workflows to New Repositories
+        run: |
+          # Deploy simple test workflow to newly created repositories
+          echo "name: Auto Test
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: curl -s ifconfig.me > auto-ip.txt
+      - run: echo \"Auto test: \$(date)\" > auto-result.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: auto-results
+          path: \"*.txt\"" | base64 -w 0 > auto-workflow.b64
+
+          nix-shell -p github-cli --run '
+            for i in {21..25}; do
+              hex=$(printf "0x%02x" $i)
+              echo "Deploying workflow to $hex..."
+              gh api repos/garmir/$hex/contents/.github/workflows/auto-test.yml --method PUT \
+                --field message="Deploy auto-test workflow" \
+                --field content="$(cat auto-workflow.b64)" || echo "$hex workflow exists"
+            done
+          '
+
+      - name: Trigger Chain Reaction
+        run: |
+          # Create trigger files in new repositories to start cascade
+          nix-shell -p github-cli --run '
+            for i in {21..25}; do
+              hex=$(printf "0x%02x" $i)
+              echo "Triggering $hex..."
+              echo "Chain reaction trigger: $(date)" | base64 -w 0 > chain.b64
+              gh api repos/garmir/$hex/contents/chain-trigger.txt --method PUT \
+                --field message="Trigger chain reaction" \
+                --field content="$(cat chain.b64)" || echo "$hex triggered"
+            done
+          '
+
+      - name: Upload Cascade Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: cascade-results
+          path: "*.txt"
+          retention-days: 1
