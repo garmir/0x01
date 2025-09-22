@@ -1,0 +1,131 @@
+name: Maximum GitHub Compute Deployment - All 181 Repositories
+on:
+  workflow_dispatch:
+    inputs:
+      execution_type:
+        description: 'Execution type'
+        required: true
+        default: 'maximum-parallel'
+        type: choice
+        options:
+        - maximum-parallel
+        - research-coordination
+        - infrastructure-validation
+
+jobs:
+  maximum-coordinator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+        continue-on-error: true
+
+      - name: Deploy to All 181 Repositories
+        continue-on-error: true
+        run: |
+          echo "🚀 Maximum GitHub Compute Deployment"
+          echo "==================================="
+          echo "Target: All 181 repositories"
+          echo "Pattern: .claude simple syntax (RULES.md)"
+          echo ""
+
+          # Get all repository names using simple approach
+          nix-shell -p github-cli --run 'gh repo list garmir --limit 200 > all-repos.txt'
+
+          # Deploy simple test workflow to first batch
+          nix-shell -p bash github-cli coreutils --run '
+            counter=1
+            while IFS= read -r line && [ $counter -le 20 ]; do
+              repo=$(echo "$line" | cut -f1 | cut -d/ -f2)
+              echo "[$counter/20] Deploying to $repo..."
+
+              # Create simple reliable workflow
+              echo "name: Repository Validation
+on: [workflow_dispatch, push]
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - run: curl -s ifconfig.me > ip-$repo.txt
+      - run: echo \"Repository $repo validation: \$(date)\" > validation-$repo.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: validation-$repo
+          path: \"*.txt\"" | base64 -w 0 > workflow.b64
+
+              # Deploy workflow
+              gh api repos/garmir/$repo/contents/.github/workflows/validation.yml --method PUT \
+                --field message="Deploy validation workflow for maximum parallel execution" \
+                --field content="$(cat workflow.b64)" 2>/dev/null || echo "Exists"
+
+              counter=$((counter + 1))
+            done < all-repos.txt
+          '
+
+      - name: Launch Workflows on First Batch
+        run: |
+          # Launch workflows on first 20 repositories
+          nix-shell -p bash github-cli --run '
+            counter=1
+            while IFS= read -r line && [ $counter -le 20 ]; do
+              repo=$(echo "$line" | cut -f1 | cut -d/ -f2)
+              echo "Launching workflow on $repo..."
+              gh workflow run validation.yml --repo garmir/$repo &
+              counter=$((counter + 1))
+            done < all-repos.txt
+            wait
+          '
+
+      - name: Ubuntu Fallback Deployment
+        if: failure()
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y curl jq
+          echo "✅ Ubuntu fallback deployment ready"
+
+  batch-deployment:
+    needs: maximum-coordinator
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        batch: [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+        continue-on-error: true
+
+      - name: Deploy Batch ${{ matrix.batch }}
+        continue-on-error: true
+        run: |
+          echo "🔄 Deploying batch ${{ matrix.batch }} of repositories..."
+
+          # Calculate repository range for this batch
+          START=$(( (${{ matrix.batch }} - 1) * 20 + 1 ))
+          END=$(( ${{ matrix.batch }} * 20 ))
+
+          echo "Processing repositories $START to $END"
+
+          # Deploy to batch repositories
+          nix-shell -p bash github-cli --run '
+            gh repo list garmir --limit 200 | head -$END | tail -n +$START | while IFS= read -r line; do
+              repo=$(echo "$line" | cut -f1 | cut -d/ -f2)
+              echo "Batch ${{ matrix.batch }}: Deploying to $repo"
+
+              # Launch simple validation workflow
+              gh workflow run validation.yml --repo garmir/$repo 2>/dev/null || \
+              gh workflow run simple-test.yml --repo garmir/$repo 2>/dev/null || \
+              echo "$repo queued"
+            done
+          '
+
+      - name: Collect Batch Results
+        run: |
+          nix-shell -p curl --run 'curl -s ifconfig.me > batch-${{ matrix.batch }}-ip.txt'
+          echo "Batch ${{ matrix.batch }} deployment: $(date)" > batch-${{ matrix.batch }}-log.txt
+
+      - name: Upload Batch Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: batch-${{ matrix.batch }}-results
+          path: "*.txt"
+          retention-days: 7
