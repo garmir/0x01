@@ -1,0 +1,34 @@
+name: Minimal Validation Test
+on: 
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: "Test execution type"
+        required: false
+        default: "validation"
+
+jobs:
+  minimal-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+        continue-on-error: true
+        
+      - name: Minimal Nix Test
+        continue-on-error: true
+        run: |
+          nix-shell -p curl coreutils --run "echo Minimal test started && curl -s ifconfig.me > ip.txt && echo Test completed"
+          
+      - name: Ubuntu Fallback
+        if: failure()
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y curl
+          echo "Ubuntu fallback test" && curl -s ifconfig.me > fallback-ip.txt
+          
+      - name: Upload Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: minimal-test-results
+          path: "*.txt"
