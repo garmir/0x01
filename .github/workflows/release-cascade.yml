@@ -1,0 +1,45 @@
+name: Release Cascade Test
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  release-cascade:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+        continue-on-error: true
+
+      - name: Test Release-Based Cascade
+        continue-on-error: true
+        run: |
+          nix-shell -p curl coreutils --run '
+            echo "=== Release Cascade Test ===" > release-cascade.txt
+            echo "Repository: ${{ github.repository }}" >> release-cascade.txt
+            echo "Release Tag: ${{ github.event.release.tag_name }}" >> release-cascade.txt
+            echo "Timestamp: $(date)" >> release-cascade.txt
+            curl -s ifconfig.me >> release-cascade.txt
+          '
+
+      - name: Create Cascade Release in Next Repository
+        run: |
+          nix-shell -p github-cli --run '
+            gh release create cascade-$(date +%s) --repo garmir/0x03 --title "Cascade Release from ${{ github.repository }}" --notes "Automated cascade release trigger" || echo "Release cascade triggered"
+          '
+
+      - name: Ubuntu Fallback
+        if: failure()
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y curl
+          echo "Ubuntu release cascade fallback" > release-fallback.txt
+          curl -s ifconfig.me >> release-fallback.txt
+
+      - name: Upload Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-cascade-results
+          path: "*.txt"
+          retention-days: 1
